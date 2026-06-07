@@ -2,10 +2,11 @@
 import asyncio
 import threading
 import queue
-import json
 import psutil
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from bridge import msg_queue, post 
+import main  # Now perfectly safe from circular imports!
 
 app = FastAPI()
 
@@ -26,7 +27,7 @@ def post(event, data=None):
     msg_queue.put({"type": event, "payload": data})
 
 # Import main AFTER defining post to avoid circular import errors
-import main 
+import main
 
 class ConnectionManager:
     def __init__(self):

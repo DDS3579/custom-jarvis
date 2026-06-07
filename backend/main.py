@@ -4,81 +4,51 @@ import time
 import pyttsx3
 from dotenv import load_dotenv
 import speech_recognition as sr
-from langchain_ollama import ChatOllama, OllamaLLM
-
-# from langchain_openai import ChatOpenAI # if you want to use openai
-from langchain_core.messages import HumanMessage
+from langchain_ollama import ChatOllama
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 
-# importing tools
+# Import tools
 from tools.time import get_time
 from tools.OCR import read_text_from_latest_image
 from tools.arp_scan import arp_scan_terminal
 from tools.duckduckgo import duckduckgo_search_tool
 from tools.matrix import matrix_mode
 from tools.screenshot import take_screenshot
-
-# Imports for the todos
 from tools.todo import add_todo, remove_todo, complete_todo, list_todos
+
+# 🔥 CRITICAL: Import post from the bridge, NOT the old GUI
+try:
+    from bridge import post
+except ImportError:
+    def post(event, data=None): 
+        print(f"[FALLBACK POST] {event}: {data}")
 
 load_dotenv()
 
-try:
-    from server import post
-except ImportError:
-    def post(event, data=None): pass
-
 MIC_INDEX = None
 TRIGGER_WORD = "jarvis"
-CONVERSATION_TIMEOUT = 30  # seconds of inactivity before exiting conversation mode
+CONVERSATION_TIMEOUT = 30
 
-logging.basicConfig(level=logging.DEBUG)  # logging
+# Keep logging clean so we can see server errors
+logging.basicConfig(level=logging.INFO) 
 
-# api_key = os.getenv("OPENAI_API_KEY") removed because it's not needed for ollama
-# org_id = os.getenv("OPENAI_ORG_ID") removed because it's not needed for ollama
+tools_list = [
+    get_time, arp_scan_terminal, read_text_from_latest_image, 
+    duckduckgo_search_tool, matrix_mode, take_screenshot, 
+    add_todo, remove_todo, complete_todo, list_todos
+]
 
-recognizer = sr.Recognizer()
-mic = sr.Microphone(device_index=MIC_INDEX)
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are Jarvis, an intelligent, conversational AI assistant. Your goal is to be helpful, friendly, and informative. You can respond in natural, human-like language and use tools when needed to answer questions more accurately. Always explain your reasoning simply when appropriate, and keep your responses conversational and concise."),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}"),
+])
 
-# Initialize LLM
-llm = ChatOllama(model="qwen3:1.7b", reasoning=False)
-
-# llm = ChatOpenAI(model="gpt-4o-mini", api_key=api_key, organization=org_id) for openai
-
-# Tool list
-tools = [get_time, arp_scan_terminal, read_text_from_latest_image, duckduckgo_search_tool, matrix_mode, take_screenshot, add_todo, remove_todo, complete_todo, list_todos]
-
-# Tool-calling prompt
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are Jarvis, an intelligent, conversational AI assistant. Your goal is to be helpful, friendly, and informative. You can respond in natural, human-like language and use tools when needed to answer questions more accurately. Always explain your reasoning simply when appropriate, and keep your responses conversational and concise.",
-        ),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
-    ]
-)
-
-# Agent + executor
-agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
-executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-
-
-# TTS setup
-def speak_text(text: str):
+def speak_text(text: str, engine):
     post("status", "speaking")
     post("log", ("jarvis", text))
     try:
-        engine = pyttsx3.init()
-        # pyright doesn't know the exact type returned by getProperty
-        for voice in engine.getProperty("voices"): # type: ignore
-            if "jamie" in voice.name.lower():
-                engine.setProperty("voice", voice.id)
-                break
-        engine.setProperty("rate", 180)
-        engine.setProperty("volume", 1.0)
         engine.say(text)
         engine.runAndWait()
         time.sleep(0.3)
@@ -87,12 +57,40 @@ def speak_text(text: str):
     finally:
         post("status", "idle")
 
-
-# Main interaction loop
 def write():
+    print("🔥 JARVIS VOICE LOOP STARTED SUCCESSFULLY")
+    post("status", "idle")
+    
+    try:
+        recognizer = sr.Recognizer()
+        mic = sr.Microphone(device_index=MIC_INDEX)
+        
+        llm = ChatOllama(model="qwen3:1.7b", reasoning=False)
+        agent = create_tool_calling_agent(llm=llm, tools=tools_list, prompt=prompt)
+        executor = AgentExecutor(agent=agent, tools=tools_list, verbose=True)
+        
+        engine = pyttsx3.init()
+        # ✅ Fixed: check for list/tuple before iterating
+        voices = engine.getProperty("voices")
+        if isinstance(voices, (list, tuple)):
+            for voice in voices:
+                if "jamie" in voice.name.lower():
+                    engine.setProperty("voice", voice.id)
+                    break
+        else:
+            logging.warning("⚠️ No voices list returned, using default voice.")
+        
+        engine.setProperty("rate", 180)
+        engine.setProperty("volume", 1.0)
+        
+    except Exception as e:
+        logging.critical(f"❌ Failed to initialize hardware/LLM: {e}")
+        post("status", "error")
+        return
+
     conversation_mode = False
     last_interaction_time = None
-
+    
     try:
         with mic as source:
             recognizer.adjust_for_ambient_noise(source)
@@ -102,57 +100,42 @@ def write():
                         post("status", "idle")
                         logging.info("🎤 Listening for wake word...")
                         audio = recognizer.listen(source, timeout=10)
-                        transcript = recognizer.recognize_google(audio) # type: ignore
+                        transcript = recognizer.recognize_google(audio)  # type: ignore
                         logging.info(f"🗣 Heard: {transcript}")
 
                         if TRIGGER_WORD.lower() in transcript.lower():
-                            logging.info(f"🗣 Triggered by: {transcript}")
-                            # Wake word detected, entering convo mode
                             post("log", ("user", transcript))
-                            speak_text("Yes sir?")
+                            speak_text("Yes sir?", engine)
                             conversation_mode = True
                             last_interaction_time = time.time()
-                        else:
-                            logging.debug("Wake word not detected, continuing...")
                     else:
                         post("status", "listening")
                         logging.info("🎤 Listening for next command...")
                         audio = recognizer.listen(source, timeout=10)
-                        command = recognizer.recognize_google(audio) # type: ignore
+                        command = recognizer.recognize_google(audio)  # type: ignore
                         logging.info(f"📥 Command: {command}")
                         
                         post("log", ("user", command))
                         post("status", "thinking")
 
-                        logging.info("🤖 Sending command to agent...")
                         response = executor.invoke({"input": command})
                         content = response["output"]
-                        logging.info(f"✅ Agent responded: {content}")
-
-                        # print("Jarvis:", content)
-                        speak_text(content)
+                        
+                        speak_text(content, engine)
                         last_interaction_time = time.time()
 
                 except sr.WaitTimeoutError:
-                    logging.warning("⚠️ Timeout waiting for audio.")
-                    if (
-                        conversation_mode
-                        and last_interaction_time is not None
-                        and time.time() - last_interaction_time > CONVERSATION_TIMEOUT
-                    ):
-                        logging.info(
-                            "⌛ No input in conversation mode. Returning to wake word mode."
-                        )
+                    if conversation_mode and last_interaction_time and (time.time() - last_interaction_time > CONVERSATION_TIMEOUT):
+                        logging.info("⌛ Timeout: Returning to wake word mode.")
                         conversation_mode = False
                 except sr.UnknownValueError:
-                    logging.warning("⚠️ Could not understand audio.")
+                    pass
                 except Exception as e:
-                    logging.error(f"❌ Error during recognition or tool call: {e}")
+                    logging.error(f"❌ Loop error: {e}")
                     time.sleep(1)
 
     except Exception as e:
         logging.critical(f"❌ Critical error in main loop: {e}")
-
 
 if __name__ == "__main__":
     write()
