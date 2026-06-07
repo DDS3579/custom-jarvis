@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import pyttsx3
+import pythoncom
 from dotenv import load_dotenv
 import speech_recognition as sr
 from langchain_ollama import ChatOllama
@@ -58,6 +59,7 @@ def speak_text(text: str, engine):
         post("status", "idle")
 
 def write():
+    pythoncom.CoInitialize()
     print("🔥 JARVIS VOICE LOOP STARTED SUCCESSFULLY")
     post("status", "idle")
     
