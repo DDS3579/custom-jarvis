@@ -1,49 +1,99 @@
-// src/App.jsx
+// frontend/src/App.jsx
 import { useWebSocket } from './useWebSocket';
+import { useEffect, useRef } from 'react';
 
 function App() {
-  // Connect to Python backend
   const { state, logs, metrics } = useWebSocket('ws://localhost:8000/ws');
+  const logEndRef = useRef(null);
 
-  // Map Python states to UI colors
-  const stateColors = {
-    idle: 'text-cyan-400',
-    listening: 'text-green-400 animate-pulse',
-    thinking: 'text-yellow-400 animate-spin',
-    speaking: 'text-blue-400',
-    error: 'text-red-500'
+  // Map Python states to Tailwind/CSS classes
+  const stateConfig = {
+    idle:      { color: 'cyan', text: 'AWAITING INPUT', ring: 'border-cyan-500/50' },
+    listening: { color: 'green', text: 'LISTENING...', ring: 'border-green-500 shadow-[0_0_50px_#22c55e]' },
+    thinking:  { color: 'yellow', text: 'PROCESSING...', ring: 'border-yellow-500 shadow-[0_0_50px_#eab308] animate-spin' },
+    speaking:  { color: 'blue', text: 'TRANSMITTING...', ring: 'border-blue-500 shadow-[0_0_50px_#3b82f6] animate-pulse' },
+    error:     { color: 'red', text: 'SYSTEM ERROR', ring: 'border-red-500' }
   };
 
+  const current = stateConfig[state] || stateConfig.idle;
+
+  // Auto-scroll chat log to bottom
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-[#05080f] font-mono">
+    <div className="min-h-screen bg-[#05080f] text-cyan-400 font-mono p-8 flex flex-col items-center overflow-hidden relative">
       
-      {/* 1. THE CORE (Replace this div with your 3D Orb / Canvas) */}
-      <div className={`w-64 h-64 rounded-full border-4 ${stateColors[state]} flex items-center justify-center mb-8 shadow-[0_0_50px_rgba(0,240,255,0.5)]`}>
-        <h1 className="text-4xl font-bold uppercase tracking-widest">{state}</h1>
-      </div>
+      {/* Background Grid Effect */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(0,240,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,240,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
 
-      {/* 2. SYSTEM METRICS */}
-      <div className="flex gap-8 mb-8 text-sm">
-        <div className="border border-cyan-900 p-4 rounded bg-black/50">
-          <p className="text-gray-500">CPU LOAD</p>
-          <p className="text-2xl text-cyan-400">{metrics.cpu}%</p>
-        </div>
-        <div className="border border-cyan-900 p-4 rounded bg-black/50">
-          <p className="text-gray-500">MEMORY</p>
-          <p className="text-2xl text-cyan-400">{metrics.ram}%</p>
-        </div>
-      </div>
-
-      {/* 3. COMMS LOG */}
-      <div className="w-full max-w-2xl h-64 overflow-y-auto border border-cyan-900 p-4 rounded bg-black/50 text-sm">
-        {logs.map((log, index) => (
-          <div key={index} className="mb-2">
-            <span className={log[0] === 'user' ? 'text-green-400 font-bold' : 'text-cyan-400 font-bold'}>
-              [{log[0].toUpperCase()}]
-            </span>
-            <span className="text-gray-300 ml-2">{log[1]}</span>
+      {/* 1. THE INTERACTIVE CORE */}
+      <div className="relative z-10 flex flex-col items-center mb-12">
+        <div className={`w-48 h-48 rounded-full border-4 ${current.ring} flex items-center justify-center transition-all duration-500 bg-black/40 backdrop-blur-sm`}>
+          <div className={`w-32 h-32 rounded-full border-2 border-${current.color}-400/30 flex items-center justify-center`}>
+            <h1 className={`text-2xl font-bold uppercase tracking-widest text-${current.color}-400`}>
+              {current.text}
+            </h1>
           </div>
-        ))}
+        </div>
+      </div>
+
+      {/* 2. SYSTEM METRICS BAR */}
+      <div className="relative z-10 flex gap-8 mb-8 text-sm w-full max-w-2xl">
+        <div className="flex-1 border border-cyan-900/50 p-4 rounded bg-black/60 backdrop-blur-md">
+          <div className="flex justify-between text-gray-500 mb-1">
+            <span>CPU LOAD</span>
+            <span className="text-cyan-400">{metrics.cpu}%</span>
+          </div>
+          <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+            <div className="bg-cyan-500 h-full transition-all duration-1000" style={{width: `${metrics.cpu}%`}}></div>
+          </div>
+        </div>
+        <div className="flex-1 border border-cyan-900/50 p-4 rounded bg-black/60 backdrop-blur-md">
+          <div className="flex justify-between text-gray-500 mb-1">
+            <span>MEMORY</span>
+            <span className="text-cyan-400">{metrics.ram}%</span>
+          </div>
+          <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+            <div className="bg-cyan-500 h-full transition-all duration-1000" style={{width: `${metrics.ram}%`}}></div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. LIVE COMMS TERMINAL */}
+      <div className="relative z-10 w-full max-w-2xl h-80 border border-cyan-900/50 rounded bg-black/80 backdrop-blur-md flex flex-col shadow-[0_0_30px_rgba(0,240,255,0.1)]">
+        <div className="p-3 border-b border-cyan-900/50 flex justify-between items-center bg-cyan-900/10">
+          <span className="text-xs font-bold tracking-widest text-cyan-500">◈ LIVE COMMS LOG</span>
+          <div className="flex gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500"></div>
+            <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4 text-sm space-y-3 custom-scrollbar">
+          {logs.length === 0 && (
+            <p className="text-gray-600 italic">Awaiting transmission...</p>
+          )}
+          {logs.map((log, index) => {
+            const isUser = log[0] === 'user';
+            return (
+              <div key={index} className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                {!isUser && <span className="text-cyan-500 font-bold shrink-0">[JVS]</span>}
+                <div className={`max-w-[80%] p-3 rounded-lg ${
+                  isUser 
+                    ? 'bg-green-900/20 border border-green-500/30 text-green-300' 
+                    : 'bg-cyan-900/10 border border-cyan-500/20 text-gray-300'
+                }`}>
+                  {log[1]}
+                </div>
+                {isUser && <span className="text-green-500 font-bold shrink-0">[USR]</span>}
+              </div>
+            );
+          })}
+          <div ref={logEndRef} />
+        </div>
       </div>
 
     </div>
