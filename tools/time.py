@@ -3,16 +3,20 @@ from datetime import datetime
 import pytz
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
+import asyncio
 
 @tool
-def get_time(city: str) -> str:
+async def get_time(city: str) -> str:
     """Returns the current time in any given city worldwide."""
     try:
         # Look up city coordinates
         geolocator = Nominatim(user_agent="jarvis_assistant")
-        location = geolocator.geocode(city)
         
-        if not location:
+        # Run the synchronous geocode in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        location = await loop.run_in_executor(None, geolocator.geocode, city)
+        
+        if location is None:
             return f"Sorry, I couldn't find the city '{city}' on the map."
             
         # Find timezone based on GPS coordinates
