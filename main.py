@@ -133,10 +133,6 @@ def write():
                         speak_text(content)
                         last_interaction_time = time.time()
 
-                        if last_interaction_time is not None and time.time() - last_interaction_time > CONVERSATION_TIMEOUT:
-                            logging.info("⌛ Timeout: Returning to wake word mode.")
-                            conversation_mode = False
-
                 except sr.WaitTimeoutError:
                     logging.warning("⚠️ Timeout waiting for audio.")
                     if (
