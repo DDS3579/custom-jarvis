@@ -138,8 +138,6 @@ def write():
 
     conversation_mode = False
     last_interaction_time = None
-    # ── NEW: future‑mode flag ──────────────────────────────────────────────
-    future_mode = False
 
     try:
         with mic as source:
@@ -168,22 +166,6 @@ def write():
                         logging.info(f"📥 Command: {command}")
 
                         post("log", ("user", command))
-
-                        # ── SPECIAL: "show me the future" trigger ──────────
-                        if "show me the future" in command.lower():
-                            speak_text("Here it is sir, presenting you the future")
-                            future_mode = True
-                            last_interaction_time = time.time()
-                            continue   # skip agent, wait for next command
-
-                        # ── SPECIAL: the very next command after the trigger ──
-                        if future_mode:
-                            speak_text("it's you future sir!")
-                            future_mode = False
-                            last_interaction_time = time.time()
-                            continue   # skip agent, back to normal now
-
-                        # Normal agent processing
                         post("status", "thinking")
 
                         try:
