@@ -25,7 +25,7 @@ from tools.todo import add_todo, remove_todo, complete_todo, list_todos
 load_dotenv()
 
 try:
-    from jarvis_gui import post
+    from server import post
 except ImportError:
     def post(event, data=None): pass
 
