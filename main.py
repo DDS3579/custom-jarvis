@@ -129,7 +129,7 @@ def write():
                         content = response["output"]
                         logging.info(f"✅ Agent responded: {content}")
 
-                        print("Jarvis:", content)
+                        # print("Jarvis:", content)
                         speak_text(content)
                         last_interaction_time = time.time()
 

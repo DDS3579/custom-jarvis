@@ -1,17 +1,7 @@
 """
-Jarvis GUI — Dark Sci-Fi Interface
-Drop-in wrapper for llm-guy/jarvis (main.py logic)
-
-Requirements (add to your existing requirements.txt):
-    psutil
-
-Usage:
-    python jarvis_gui.py
-    
-This file replaces running main.py directly. It starts the Jarvis
-voice loop in a background thread and provides a full GUI overlay.
+J.A.R.V.I.S. SCI-FI HUD OVERLAY
+Cinematic Tkinter Interface with Animated Core, System Metrics, and Comms Log.
 """
-
 import tkinter as tk
 from tkinter import font as tkfont
 import threading
@@ -21,571 +11,383 @@ import psutil
 import datetime
 import os
 import json
-import sys
+import math
+import random
 
-# ─── Try to import Jarvis internals ───────────────────────────────────────────
-# We'll monkey-patch the speak / transcript functions so GUI can intercept them.
-# If main.py isn't importable yet, we run in DEMO mode.
-DEMO_MODE = False
-try:
-    # Suppress stdout from jarvis startup
-    import importlib.util, io, contextlib
-    # We don't import main directly to avoid auto-running it.
-    # Instead we import the tools and re-wire speech below.
-    pass
-except Exception:
-    DEMO_MODE = True
+# ── COLOR PALETTE ───────────────────────────────────────────────────────────
+BG      = "#05080f"  # Deep space black
+GRID    = "#0a1526"  # Faint grid lines
+CYAN    = "#00f0ff"  # Primary HUD color
+BLUE    = "#0055ff"  
+GREEN   = "#00ff66"  # Listening / Success
+YELLOW  = "#ffcc00"  # Thinking / Warning
+RED     = "#ff003c"  # Error / Close
+TEXT    = "#a0c0d0"  # Standard text
+DIM     = "#2a4050"  # Inactive elements
 
-# ─── Colour Palette ───────────────────────────────────────────────────────────
-BG        = "#0a0d12"
-PANEL     = "#0f1318"
-BORDER    = "#1c2a3a"
-ACCENT    = "#00d4ff"
-ACCENT2   = "#0077aa"
-GREEN     = "#00ff9d"
-RED       = "#ff4560"
-YELLOW    = "#ffd166"
-TEXT      = "#cde4f5"
-DIM       = "#4a6070"
-WHITE     = "#e8f4fb"
-
-# ─── Shared event queue (background thread → GUI) ─────────────────────────────
+# ── SHARED EVENT QUEUE ──────────────────────────────────────────────────────
 gui_queue = queue.Queue()
 
 def post(event, data=None):
-    if data is None:
-        data = ""
+    """Called by main.py to push state updates to the GUI."""
+    if data is None: data = ""
     gui_queue.put((event, data))
 
-# ─────────────────────────────────────────────────────────────────────────────
-# JARVIS VOICE LOOP  (runs in daemon thread)
-# Replace the body of `run_jarvis()` with your actual main.py logic.
-# The only requirement: call post() to push state updates to the GUI.
-# ─────────────────────────────────────────────────────────────────────────────
-def run_jarvis():
-    """
-    Paste / import your main.py logic here.
-    We provide stub hooks so you can wire GUI events easily.
-    """
-    if DEMO_MODE:
-        # Demo loop — simulates Jarvis activity so you can see the GUI
-        time.sleep(1.5)
-        post("status", "idle")
-        post("log", ("jarvis", "Hello! I'm Jarvis. Say my name to wake me up."))
-        while True:
-            time.sleep(8)
-    
-    # ── Real Jarvis integration ───────────────────────────────────────────────
-    # Example wiring. Adapt to match your main.py structure:
-    #
-    # from langchain_ollama import ChatOllama
-    # from tools.get_time import get_time
-    # import speech_recognition as sr
-    # import pyttsx3
-    #
-    # def speak(text):
-    #     post("log", ("jarvis", text))
-    #     post("status", "speaking")
-    #     engine.say(text)
-    #     engine.runAndWait()
-    #     post("status", "idle")
-    #
-    # def listen():
-    #     post("status", "listening")
-    #     ... your recognition code ...
-    #     post("status", "thinking")
-    #     ... your LLM call ...
-    #
-    # Then call your main loop here.
-    pass
+# ── HELPER: FAKE GLOW EFFECT ────────────────────────────────────────────────
+def blend_color(hex_color, alpha):
+    """Simulates opacity by blending a color with the background."""
+    def parse(h): return tuple(int(h[i:i+2], 16) for i in (1,3,5))
+    bg = parse(BG)
+    c  = parse(hex_color)
+    r = tuple(int(bg[i] + (c[i]-bg[i])*alpha) for i in range(3))
+    return "#{:02x}{:02x}{:02x}".format(*r)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TODO STORE  (persisted to jarvis_todos.json next to this file)
-# ─────────────────────────────────────────────────────────────────────────────
-TODO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jarvis_todos.json")
-
-def load_todos():
-    if os.path.exists(TODO_FILE):
-        try:
-            with open(TODO_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
-
-def save_todos(todos):
-    with open(TODO_FILE, "w") as f:
-        json.dump(todos, f, indent=2)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  ANIMATED PULSE RING  (canvas widget)
-# ─────────────────────────────────────────────────────────────────────────────
-class PulseRing(tk.Canvas):
-    STATES = {
-        "idle":      {"color": ACCENT2,  "rings": 1, "speed": 60},
-        "listening": {"color": GREEN,    "rings": 3, "speed": 20},
-        "thinking":  {"color": YELLOW,   "rings": 2, "speed": 30},
-        "speaking":  {"color": ACCENT,   "rings": 2, "speed": 25},
-        "error":     {"color": RED,      "rings": 2, "speed": 40},
-    }
-
-    def __init__(self, parent, size=120, **kw):
-        super().__init__(parent, width=size, height=size,
-                         bg=BG, highlightthickness=0, **kw)
+# ── THE ANIMATED CORE (CENTERPIECE) ─────────────────────────────────────────
+class CoreCanvas(tk.Canvas):
+    def __init__(self, parent, size=400):
+        super().__init__(parent, width=size, height=size, bg=BG, highlightthickness=0)
         self.size = size
-        self.cx = size // 2
-        self.cy = size // 2
+        self.c = size // 2
+        self.angle = 0
         self.state = "idle"
-        self._rings = []   # list of (canvas_id, radius, alpha_fraction)
-        self._phase = 0
-        self._after_id = None
-        self._draw_static()
-        self._animate()
-
-    def _hex_blend(self, color, alpha):
-        """Blend color toward BG by alpha (0=BG, 1=color)."""
-        def parse(h): return tuple(int(h[i:i+2], 16) for i in (1,3,5))
-        bg = parse(BG)
-        c  = parse(color)
-        r = tuple(int(bg[i] + (c[i]-bg[i])*alpha) for i in range(3))
-        return "#{:02x}{:02x}{:02x}".format(*r)
-
-    def _draw_static(self):
-        """Draw the inner core circle."""
-        pad = 10
-        self._core = self.create_oval(
-            pad, pad, self.size-pad, self.size-pad,
-            outline=ACCENT, width=2, fill=PANEL
-        )
-        # J letter
-        self._label = self.create_text(
-            self.cx, self.cy,
-            text="J", fill=ACCENT,
-            font=("Courier", int(self.size*0.28), "bold")
-        )
-
+        self.sonar_radius = 0
+        self.bars = [random.randint(10, 40) for _ in range(12)]
+        
     def set_state(self, state):
-        if state not in self.STATES:
-            state = "idle"
-        self.state = state
-        cfg = self.STATES[state]
-        self.itemconfig(self._core, outline=cfg["color"])
-        self.itemconfig(self._label, fill=cfg["color"])
+        if state != self.state:
+            self.state = state
+            if state == "listening": self.sonar_radius = 10
+                
+    def draw(self):
+        self.delete("all")
+        
+        # 1. Background crosshairs
+        self.create_line(self.c, 0, self.c, self.size, fill=GRID, dash=(2, 4))
+        self.create_line(0, self.c, self.size, self.c, fill=GRID, dash=(2, 4))
+        
+        # 2. Outer static ring with degree ticks
+        r_outer = 180
+        self.create_oval(self.c-r_outer, self.c-r_outer, self.c+r_outer, self.c+r_outer, outline=DIM, width=1)
+        
+        color = CYAN
+        speed = 1
+        if self.state == "listening": color = GREEN
+        elif self.state == "thinking": color = YELLOW; speed = 4
+        elif self.state == "speaking": color = CYAN
+        elif self.state == "error": color = RED
+        
+        for i in range(0, 360, 15):
+            rad = math.radians(i + self.angle)
+            x1 = self.c + math.cos(rad) * (r_outer - 5)
+            y1 = self.c + math.sin(rad) * (r_outer - 5)
+            x2 = self.c + math.cos(rad) * (r_outer + 5)
+            y2 = self.c + math.sin(rad) * (r_outer + 5)
+            self.create_line(x1, y1, x2, y2, fill=color, width=2)
+            
+        # 3. Inner rotating scanner line
+        self.angle = (self.angle + speed) % 360
+        rad = math.radians(self.angle)
+        x = self.c + math.cos(rad) * r_outer
+        y = self.c + math.sin(rad) * r_outer
+        self.create_line(self.c, self.c, x, y, fill=color, width=2)
+        
+        # 4. Simulated Glow Effect (Concentric Rings)
+        for i in range(4):
+            r = 100 - (i * 20)
+            alpha = 1.0 - (i * 0.25)
+            c = blend_color(color, alpha)
+            self.create_oval(self.c-r, self.c-r, self.c+r, self.c+r, outline=c, width=2)
+            
+        # 5. State-Specific Animations
+        if self.state == "listening":
+            # Sonar Pulse
+            if self.sonar_radius < r_outer:
+                self.sonar_radius += 8
+                alpha = 1.0 - (self.sonar_radius / r_outer)
+                c = blend_color(GREEN, alpha)
+                self.create_oval(self.c-self.sonar_radius, self.c-self.sonar_radius, 
+                                 self.c+self.sonar_radius, self.c+self.sonar_radius, outline=c, width=3)
+            else:
+                self.sonar_radius = 10
+                
+        elif self.state == "thinking":
+            # Complex Geometry (Spinning Hexagon)
+            r_inner = 60
+            pts = []
+            for i in range(6):
+                a = math.radians(self.angle * 2 + i * 60)
+                pts.extend([self.c + math.cos(a)*r_inner, self.c + math.sin(a)*r_inner])
+            self.create_polygon(pts, outline=YELLOW, fill="", width=2)
+            
+        elif self.state == "speaking":
+            # Audio Visualizer Waveform
+            bar_width = 8
+            gap = 6
+            total_width = len(self.bars) * (bar_width + gap)
+            start_x = self.c - total_width // 2
+            for i, h in enumerate(self.bars):
+                self.bars[i] = max(10, min(90, h + random.randint(-15, 15)))
+                h = self.bars[i]
+                x = start_x + i * (bar_width + gap)
+                self.create_rectangle(x, self.c - h//2, x + bar_width, self.c + h//2, fill=CYAN, outline="")
 
-    def _animate(self):
-        cfg = self.STATES[self.state]
-        self._phase = (self._phase + 2) % 100
+# ── SYSTEM METRICS (LEFT PANEL) ─────────────────────────────────────────────
+class SystemMetrics(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, bg=BG)
+        tk.Label(self, text="[ SYSTEM DIAGNOSTICS ]", bg=BG, fg=CYAN, font=("Consolas", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        self.cpu_canvas = tk.Canvas(self, width=150, height=150, bg=BG, highlightthickness=0)
+        self.cpu_canvas.pack(pady=10)
+        
+        self.ram_canvas = tk.Canvas(self, width=150, height=150, bg=BG, highlightthickness=0)
+        self.ram_canvas.pack(pady=10)
+        
+        self.info_text = tk.Text(self, bg=BG, fg=TEXT, font=("Consolas", 10), borderwidth=0, highlightthickness=0, width=22, height=6)
+        self.info_text.pack(anchor="w", padx=10)
+        self.info_text.config(state="disabled")
+        
+    def draw_gauge(self, canvas, value, label, color):
+        canvas.delete("all")
+        c = 75
+        r = 60
+        canvas.create_arc(c-r, c-r, c+r, c+r, start=90, extent=-360, outline=DIM, width=8, style="arc")
+        canvas.create_arc(c-r, c-r, c+r, c+r, start=90, extent=- (value * 3.6), outline=color, width=8, style="arc")
+        canvas.create_text(c, c-10, text=f"{int(value)}%", fill=color, font=("Consolas", 20, "bold"))
+        canvas.create_text(c, c+15, text=label, fill=TEXT, font=("Consolas", 10))
+        
+    def update_metrics(self):
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        
+        cpu_color = GREEN if cpu < 60 else YELLOW if cpu < 85 else RED
+        ram_color = GREEN if ram < 60 else YELLOW if ram < 85 else RED
+        
+        self.draw_gauge(self.cpu_canvas, cpu, "CPU LOAD", cpu_color)
+        self.draw_gauge(self.ram_canvas, ram, "MEMORY", ram_color)
+        
+        self.info_text.config(state="normal")
+        self.info_text.delete("1.0", "end")
+        net = psutil.net_io_counters()
+        uptime = datetime.datetime.now() - datetime.datetime.fromtimestamp(psutil.boot_time())
+        self.info_text.insert("end", f"UPTIME : {str(uptime).split('.')[0]}\n")
+        self.info_text.insert("end", f"NET UP : {net.bytes_sent // 1024} KB\n")
+        self.info_text.insert("end", f"NET DN : {net.bytes_recv // 1024} KB\n")
+        self.info_text.insert("end", f"PROCS  : {len(psutil.pids())}\n")
+        self.info_text.config(state="disabled")
 
-        # Delete old rings
-        for oid in self._rings:
-            self.delete(oid)
-        self._rings = []
-
-        if self.state != "idle":
-            n = cfg["rings"]
-            for i in range(n):
-                # Each ring offset by equal phase
-                phase = (self._phase + i * (100 // n)) % 100
-                frac  = phase / 100.0
-                r = (self.cx - 12) * (0.5 + 0.5 * frac)
-                alpha = 1.0 - frac
-                color = self._hex_blend(cfg["color"], alpha)
-                x0, y0 = self.cx - r, self.cy - r
-                x1, y1 = self.cx + r, self.cy + r
-                oid = self.create_oval(x0, y0, x1, y1,
-                                       outline=color, width=1)
-                self._rings.append(oid)
-
-        self._after_id = self.after(cfg["speed"], self._animate)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  RAM / CPU BAR
-# ─────────────────────────────────────────────────────────────────────────────
-class ResourceBar(tk.Frame):
-    def __init__(self, parent, label, get_val_fn, **kw):
-        super().__init__(parent, bg=PANEL, **kw)
-        self._get = get_val_fn
-        tk.Label(self, text=label, bg=PANEL, fg=DIM,
-                 font=("Courier", 8)).pack(anchor="w")
-        self._bar_bg = tk.Frame(self, bg=BORDER, height=6)
-        self._bar_bg.pack(fill="x", pady=(1,0))
-        self._bar_fg = tk.Frame(self._bar_bg, bg=ACCENT, height=6)
-        self._bar_fg.place(x=0, y=0, relheight=1.0, relwidth=0)
-        self._pct_lbl = tk.Label(self, bg=PANEL, fg=TEXT, font=("Courier", 8))
-        self._pct_lbl.pack(anchor="e")
-        self._update()
-
-    def _update(self):
-        v = self._get()           # 0–100
-        color = GREEN if v < 60 else YELLOW if v < 85 else RED
-        self._bar_fg.config(bg=color)
-        self._bar_fg.place(relwidth=v/100)
-        self._pct_lbl.config(text=f"{v:.0f}%")
-        self.after(1500, self._update)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONVERSATION LOG
-# ─────────────────────────────────────────────────────────────────────────────
-class ConvoLog(tk.Frame):
-    def __init__(self, parent, **kw):
-        super().__init__(parent, bg=PANEL, **kw)
-        self._text = tk.Text(
-            self, bg=PANEL, fg=TEXT, bd=0, relief="flat",
-            wrap="word", state="disabled", cursor="arrow",
-            font=("Courier", 9), padx=8, pady=6,
-            selectbackground=ACCENT2
-        )
-        sb = tk.Scrollbar(self, orient="vertical", command=self._text.yview,
-                          bg=BORDER, troughcolor=PANEL, width=6)
-        self._text.config(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self._text.pack(side="left", fill="both", expand=True)
-
-        self._text.tag_config("user",   foreground=GREEN,  font=("Courier", 9, "bold"))
-        self._text.tag_config("jarvis", foreground=ACCENT, font=("Courier", 9, "bold"))
-        self._text.tag_config("body",   foreground=TEXT,   font=("Courier", 9))
-        self._text.tag_config("ts",     foreground=DIM,    font=("Courier", 8))
-
-    def append(self, speaker, message):
-        ts   = datetime.datetime.now().strftime("%H:%M")
-        name = "YOU" if speaker == "user" else "JARVIS"
-        tag  = "user" if speaker == "user" else "jarvis"
-
-        self._text.config(state="normal")
-        self._text.insert("end", f"\n[{ts}] ", "ts")
-        self._text.insert("end", f"{name}: ", tag)
-        self._text.insert("end", message + "\n", "body")
-        self._text.config(state="disabled")
-        self._text.see("end")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TODO LIST PANEL
-# ─────────────────────────────────────────────────────────────────────────────
-class TodoPanel(tk.Frame):
-    def __init__(self, parent, **kw):
-        super().__init__(parent, bg=PANEL, **kw)
-        self._todos = load_todos()   # list of {"text":..., "done": bool}
-        self._vars  = []
-
-        hdr = tk.Frame(self, bg=PANEL)
-        hdr.pack(fill="x", padx=8, pady=(8,4))
-        tk.Label(hdr, text="◈  TASKS", bg=PANEL, fg=ACCENT,
-                 font=("Courier", 9, "bold")).pack(side="left")
-        tk.Button(hdr, text="+", bg=BORDER, fg=GREEN, relief="flat",
-                  font=("Courier", 10, "bold"), cursor="hand2",
-                  command=self._add_dialog, padx=6).pack(side="right")
-
-        self._list_frame = tk.Frame(self, bg=PANEL)
-        self._list_frame.pack(fill="both", expand=True, padx=8)
-
-        self._rebuild()
-
-    def _rebuild(self):
-        for w in self._list_frame.winfo_children():
+# ── COMMS & DIRECTIVES (RIGHT PANEL) ────────────────────────────────────────
+class CommsPanel(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, bg=BG)
+        tk.Label(self, text="[ COMMS LOG ]", bg=BG, fg=CYAN, font=("Consolas", 12, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        self.log_text = tk.Text(self, bg=BG, fg=TEXT, font=("Consolas", 10), borderwidth=0, highlightthickness=0, wrap="word")
+        self.log_text.pack(fill="both", expand=True, pady=(0, 15))
+        self.log_text.config(state="disabled")
+        
+        self.log_text.tag_config("sys", foreground=DIM)
+        self.log_text.tag_config("usr", foreground=GREEN)
+        self.log_text.tag_config("jvs", foreground=CYAN)
+        self.log_text.tag_config("body", foreground=TEXT)
+        
+        tk.Label(self, text="[ DIRECTIVES ]", bg=BG, fg=CYAN, font=("Consolas", 12, "bold")).pack(anchor="w", pady=(5, 5))
+        self.todo_frame = tk.Frame(self, bg=BG)
+        self.todo_frame.pack(fill="both", expand=True, anchor="w")
+        
+    def add_log(self, speaker, msg):
+        self.log_text.config(state="normal")
+        tag = "usr" if speaker == "user" else "jvs"
+        prefix = "USR" if speaker == "user" else "JVS"
+        self.log_text.insert("end", f"[{prefix}]> ", tag)
+        self.log_text.insert("end", f"{msg}\n", "body")
+        self.log_text.see("end")
+        self.log_text.config(state="disabled")
+        
+    def update_todos(self, todos):
+        for w in self.todo_frame.winfo_children():
             w.destroy()
-        self._vars = []
-        for i, todo in enumerate(self._todos):
-            row = tk.Frame(self._list_frame, bg=PANEL)
-            row.pack(fill="x", pady=1)
-            var = tk.BooleanVar(value=todo["done"])
-            self._vars.append(var)
+        for t in todos:
+            status = "[X]" if t["done"] else "[ ]"
+            color = DIM if t["done"] else TEXT
+            tk.Label(self.todo_frame, text=f"{status} {t['text']}", bg=BG, fg=color, font=("Consolas", 10), anchor="w").pack(fill="x", padx=10)
 
-            def _toggle(idx=i, v=var):
-                self._todos[idx]["done"] = v.get()
-                save_todos(self._todos)
-                self._rebuild()
-
-            cb = tk.Checkbutton(
-                row, variable=var, bg=PANEL,
-                activebackground=PANEL, fg=ACCENT,
-                selectcolor=PANEL, relief="flat",
-                command=_toggle
-            )
-            cb.pack(side="left")
-            style = "overstrike" if todo["done"] else ""
-            color = DIM if todo["done"] else TEXT
-            tk.Label(row, text=todo["text"], bg=PANEL, fg=color,
-                     font=("Courier", 9, style),
-                     anchor="w").pack(side="left", fill="x", expand=True)
-            tk.Button(row, text="✕", bg=PANEL, fg=RED, relief="flat",
-                      font=("Courier", 8), cursor="hand2",
-                      command=lambda idx=i: self._delete(idx)).pack(side="right")
-
-    def _delete(self, idx):
-        self._todos.pop(idx)
-        save_todos(self._todos)
-        self._rebuild()
-
-    def _add_dialog(self):
-        dlg = tk.Toplevel(self)
-        dlg.title("New Task")
-        dlg.configure(bg=BG)
-        dlg.resizable(False, False)
-        dlg.geometry("340x110")
-        dlg.grab_set()
-
-        tk.Label(dlg, text="Task:", bg=BG, fg=TEXT,
-                 font=("Courier", 9)).pack(anchor="w", padx=14, pady=(14,2))
-        entry = tk.Entry(dlg, bg=PANEL, fg=WHITE, insertbackground=ACCENT,
-                         relief="flat", font=("Courier", 10), bd=6)
-        entry.pack(fill="x", padx=14)
-        entry.focus()
-
-        def _save(e=None):
-            txt = entry.get().strip()
-            if txt:
-                self._todos.append({"text": txt, "done": False})
-                save_todos(self._todos)
-                self._rebuild()
-            dlg.destroy()
-
-        entry.bind("<Return>", _save)
-        tk.Button(dlg, text="ADD", bg=ACCENT2, fg=WHITE, relief="flat",
-                  font=("Courier", 9, "bold"), command=_save,
-                  cursor="hand2", padx=10, pady=4).pack(pady=8)
-
-    def add_task_from_voice(self, text):
-        """Called by Jarvis voice logic to add tasks programmatically."""
-        self._todos.append({"text": text, "done": False})
-        save_todos(self._todos)
-        self._rebuild()
-
-    def remove_from_voice(self, text):
-        """Called by Jarvis voice logic to remove a task by name."""
-        text_lower = text.lower()
-        # Reload from disk to stay in sync with tool
-        self._todos = load_todos()
-        self._rebuild()
-
-    def complete_from_voice(self, text):
-        """Called by Jarvis voice logic to mark a task done by name."""
-        # Reload from disk — the tool already saved the change
-        self._todos = load_todos()
-        self._rebuild()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STATUS BAR  (bottom strip)
-# ─────────────────────────────────────────────────────────────────────────────
-class StatusBar(tk.Frame):
-    LABELS = {
-        "idle":      ("● IDLE",      DIM),
-        "listening": ("◉ LISTENING", GREEN),
-        "thinking":  ("◈ THINKING",  YELLOW),
-        "speaking":  ("▶ SPEAKING",  ACCENT),
-        "error":     ("✖ ERROR",     RED),
-    }
-
-    def __init__(self, parent, **kw):
-        super().__init__(parent, bg=BORDER, height=28, **kw)
-        self._state_lbl = tk.Label(self, text="● IDLE", bg=BORDER, fg=DIM,
-                                   font=("Courier", 9, "bold"))
-        self._state_lbl.pack(side="left", padx=12)
-
-        self._time_lbl = tk.Label(self, bg=BORDER, fg=DIM, font=("Courier", 9))
-        self._time_lbl.pack(side="right", padx=12)
-        self._tick()
-
-        self._model_lbl = tk.Label(self, text="MODEL: qwen3:1.7b",
-                                   bg=BORDER, fg=DIM, font=("Courier", 9))
-        self._model_lbl.pack(side="right", padx=12)
-
-    def set_state(self, state):
-        txt, color = self.LABELS.get(state, ("● IDLE", DIM))
-        self._state_lbl.config(text=txt, fg=color)
-
-    def set_model(self, name):
-        self._model_lbl.config(text=f"MODEL: {name}")
-
-    def _tick(self):
-        now = datetime.datetime.now().strftime("%a %d %b  %H:%M:%S")
-        self._time_lbl.config(text=now)
-        self.after(1000, self._tick)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  MAIN WINDOW
-# ─────────────────────────────────────────────────────────────────────────────
+# ── MAIN APPLICATION WINDOW ─────────────────────────────────────────────────
 class JarvisApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("JARVIS  //  Local AI Assistant")
+        self.title("J.A.R.V.I.S.")
         self.configure(bg=BG)
-        self.geometry("900x620")
-        self.minsize(760, 520)
-
-        # Custom window chrome
-        self._build_titlebar()
-        self._build_body()
-        self._build_statusbar()
-
-        # Start polling the event queue
+        self.geometry("1200x700")
+        self.minsize(1000, 600)
+        
+        # Sci-Fi Window Settings (Borderless & Slightly Transparent)
+        self.overrideredirect(True) 
+        self.attributes("-alpha", 0.92) 
+        self.attributes("-topmost", True)
+        
+        # Dragging Logic
+        self.bind("<Button-1>", self.start_move)
+        self.bind("<B1-Motion>", self.do_move)
+        
+        self._build_ui()
+        self._boot_sequence()
+        
+        # Start Background Threads
         self._poll_queue()
-
-        # Start Jarvis voice loop in daemon thread
-        t = threading.Thread(target=run_jarvis, daemon=True)
+        self._animate()
+        self._update_metrics()
+        self._data_stream()
+        
+        t = threading.Thread(target=self.run_jarvis_logic, daemon=True)
         t.start()
 
-        # Boot message
-        self.after(600, lambda: self._convo.append(
-            "jarvis",
-            "System online. Say 'Jarvis' to begin."
-        ))
+    def start_move(self, event):
+        self.x = event.x
+        self.y = event.y
 
-    # ── Title bar ─────────────────────────────────────────────────────────────
-    def _build_titlebar(self):
-        bar = tk.Frame(self, bg=PANEL, height=42)
-        bar.pack(fill="x", side="top")
-        bar.pack_propagate(False)
-
-        # Drag support
-        bar.bind("<ButtonPress-1>",   self._drag_start)
-        bar.bind("<B1-Motion>",       self._drag_move)
-
-        tk.Label(bar, text="◈ JARVIS", bg=PANEL, fg=ACCENT,
-                 font=("Courier", 13, "bold")).pack(side="left", padx=14)
-        tk.Label(bar, text="LOCAL AI ASSISTANT", bg=PANEL, fg=DIM,
-                 font=("Courier", 8)).pack(side="left", padx=4)
-
-        # Window buttons
-        for sym, cmd, col in [
-            ("✕", self.destroy, RED),
-            ("▭", self._toggle_max, DIM),
-            ("─", self.iconify, DIM),
-        ]:
-            tk.Button(bar, text=sym, bg=PANEL, fg=col, relief="flat",
-                      font=("Courier", 10), cursor="hand2",
-                      activebackground=BORDER, command=cmd,
-                      padx=8).pack(side="right")
-
-    def _drag_start(self, e):
-        self._dx, self._dy = e.x, e.y
-
-    def _drag_move(self, e):
-        x = self.winfo_x() + e.x - self._dx
-        y = self.winfo_y() + e.y - self._dy
+    def do_move(self, event):
+        x = self.winfo_x() + event.x - self.x
+        y = self.winfo_y() + event.y - self.y
         self.geometry(f"+{x}+{y}")
 
-    def _toggle_max(self):
-        self.state("zoomed" if self.state() != "zoomed" else "normal")
+    def _build_ui(self):
+        # Close Button
+        close_btn = tk.Label(self, text="[ X ]", bg=BG, fg=RED, font=("Consolas", 14, "bold"))
+        close_btn.place(relx=1.0, x=-40, y=10)
+        close_btn.bind("<Button-1>", lambda e: self.destroy())
+        
+        # Top Status Bar
+        top_bar = tk.Frame(self, bg=BG, height=40)
+        top_bar.pack(fill="x", side="top", padx=20, pady=10)
+        tk.Label(top_bar, text="J.A.R.V.I.S. // LOCAL NEURAL NET", bg=BG, fg=CYAN, font=("Consolas", 16, "bold")).pack(side="left")
+        
+        self.time_lbl = tk.Label(top_bar, bg=BG, fg=TEXT, font=("Consolas", 12))
+        self.time_lbl.pack(side="right")
+        self._tick_time()
+        
+        # Main Layout (3 Columns)
+        main_grid = tk.Frame(self, bg=BG)
+        main_grid.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Left: Metrics
+        self.metrics = SystemMetrics(main_grid)
+        self.metrics.pack(side="left", fill="y", padx=(0, 20))
+        
+        # Center: Core & Status
+        center_frame = tk.Frame(main_grid, bg=BG)
+        center_frame.pack(side="left", fill="both", expand=True)
+        
+        self.core = CoreCanvas(center_frame, size=400)
+        self.core.pack(expand=True)
+        
+        self.status_lbl = tk.Label(center_frame, text="> AWAITING INPUT_", bg=BG, fg=CYAN, font=("Consolas", 14, "bold"))
+        self.status_lbl.pack(pady=20)
+        
+        # Right: Comms & Todos
+        self.comms = CommsPanel(main_grid)
+        self.comms.pack(side="right", fill="y", padx=(20, 0), ipadx=10)
+        
+    def _boot_sequence(self):
+        self.boot_frame = tk.Frame(self, bg=BG)
+        self.boot_frame.place(relwidth=1, relheight=1)
+        self.terminal = tk.Label(self.boot_frame, bg=BG, fg=GREEN, font=("Consolas", 14), anchor="nw", justify="left")
+        self.terminal.pack(fill="both", expand=True, padx=50, pady=50)
+        
+        lines = [
+            "> INITIALIZING NEURAL NETWORK...",
+            "> LOADING LANGUAGE MODEL [qwen3:1.7b]...",
+            "> CALIBRATING AUDIO SENSORS...",
+            "> ESTABLISHING SECURE UPLINK...",
+            "> SYSTEM ONLINE."
+        ]
+        
+        def type_line(idx=0):
+            if idx < len(lines):
+                self.terminal.config(text=self.terminal.cget("text") + "\n" + lines[idx])
+                self.after(500, lambda: type_line(idx + 1))
+            else:
+                self.after(800, self.boot_frame.destroy)
+        type_line()
 
-    # ── Main body ─────────────────────────────────────────────────────────────
-    def _build_body(self):
-        body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=0, pady=0)
+    def _tick_time(self):
+        now = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+        self.time_lbl.config(text=now)
+        self.after(1000, self._tick_time)
+        
+    def _data_stream(self):
+        """Random hex data in the bottom left corner for that cinematic feel."""
+        if not hasattr(self, 'stream_lbl'):
+            self.stream_lbl = tk.Label(self, bg=BG, fg=DIM, font=("Consolas", 8), anchor="sw")
+            self.stream_lbl.place(x=10, rely=1.0, y=-10)
+            
+        hex_str = "".join([random.choice("0123456789ABCDEF") for _ in range(40)])
+        self.stream_lbl.config(text=f"0x{hex_str}")
+        self.after(150, self._data_stream)
 
-        # LEFT SIDEBAR
-        sidebar = tk.Frame(body, bg=PANEL, width=200)
-        sidebar.pack(side="left", fill="y", padx=(8,4), pady=8)
-        sidebar.pack_propagate(False)
+    def _animate(self):
+        self.core.draw()
+        self.after(33, self._animate) # ~30 FPS
+        
+    def _update_metrics(self):
+        self.metrics.update_metrics()
+        self.after(2000, self._update_metrics)
 
-        # Pulse ring
-        self._pulse = PulseRing(sidebar, size=110)
-        self._pulse.pack(pady=(18, 8))
-
-        tk.Frame(sidebar, bg=BORDER, height=1).pack(fill="x", padx=10)
-
-        # Resource bars
-        res_frame = tk.Frame(sidebar, bg=PANEL)
-        res_frame.pack(fill="x", padx=12, pady=10)
-        tk.Label(res_frame, text="SYSTEM", bg=PANEL, fg=DIM,
-                 font=("Courier", 8, "bold")).pack(anchor="w", pady=(0,4))
-        ResourceBar(res_frame, "RAM",
-                    lambda: psutil.virtual_memory().percent
-                    ).pack(fill="x", pady=2)
-        ResourceBar(res_frame, "CPU",
-                    lambda: psutil.cpu_percent(interval=None)
-                    ).pack(fill="x", pady=2)
-
-        tk.Frame(sidebar, bg=BORDER, height=1).pack(fill="x", padx=10)
-
-        # Todo list
-        self._todo = TodoPanel(sidebar)
-        self._todo.pack(fill="both", expand=True, pady=4)
-
-        # RIGHT — Conversation log
-        right = tk.Frame(body, bg=BG)
-        right.pack(side="left", fill="both", expand=True, padx=(4,8), pady=8)
-
-        hdr = tk.Frame(right, bg=BG)
-        hdr.pack(fill="x", pady=(0,4))
-        tk.Label(hdr, text="◈  CONVERSATION", bg=BG, fg=ACCENT,
-                 font=("Courier", 9, "bold")).pack(side="left")
-        tk.Button(hdr, text="CLEAR", bg=BORDER, fg=DIM, relief="flat",
-                  font=("Courier", 8), cursor="hand2",
-                  command=self._clear_log, padx=6).pack(side="right")
-
-        self._convo = ConvoLog(right)
-        self._convo.pack(fill="both", expand=True)
-
-        # Manual input row (type to Jarvis when voice isn't convenient)
-        inp_row = tk.Frame(right, bg=PANEL)
-        inp_row.pack(fill="x", pady=(6,0))
-        self._entry = tk.Entry(
-            inp_row, bg=BORDER, fg=WHITE, insertbackground=ACCENT,
-            relief="flat", font=("Courier", 10), bd=8
-        )
-        self._entry.pack(side="left", fill="x", expand=True, padx=(6,4), pady=6)
-        self._entry.bind("<Return>", self._send_text)
-        tk.Button(inp_row, text="SEND ▶", bg=ACCENT2, fg=WHITE, relief="flat",
-                  font=("Courier", 9, "bold"), cursor="hand2",
-                  command=self._send_text, padx=10).pack(side="right", padx=6)
-
-    def _build_statusbar(self):
-        self._statusbar = StatusBar(self)
-        self._statusbar.pack(fill="x", side="bottom")
-
-    # ── Event queue polling ────────────────────────────────────────────────────
     def _poll_queue(self):
         try:
             while True:
                 event, data = gui_queue.get_nowait()
                 if event == "status":
-                    self._pulse.set_state(data)
-                    self._statusbar.set_state(data)
+                    self.core.set_state(data)
+                    txt = {
+                        "idle": "> AWAITING INPUT_",
+                        "listening": "> LISTENING...",
+                        "thinking": "> PROCESSING NEURAL NET...",
+                        "speaking": "> TRANSMITTING AUDIO_",
+                        "error": "> ERROR ENCOUNTERED_"
+                    }.get(data, "> AWAITING INPUT_")
+                    self.status_lbl.config(text=txt)
                 elif event == "log":
                     speaker, msg = data
-                    self._convo.append(speaker, msg)
-                elif event == "todo_add":
-                    self._todo.add_task_from_voice(data)
-                elif event == "todo_remove":
-                    self._todo.remove_from_voice(data)
-                elif event == "todo_complete":
-                    self._todo.complete_from_voice(data)
-                elif event == "model":
-                    self._statusbar.set_model(data)
+                    self.comms.add_log(speaker, msg)
+                elif event in ["todo_add", "todo_remove", "todo_complete"]:
+                    self._reload_todos()
         except queue.Empty:
             pass
-        self.after(80, self._poll_queue)
+        self.after(100, self._poll_queue)
+        
+    def _reload_todos(self):
+        try:
+            todo_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jarvis_todos.json")
+            with open(todo_file, "r") as f:
+                todos = json.load(f)
+            self.comms.update_todos(todos)
+        except:
+            pass
 
-    # ── Text input ────────────────────────────────────────────────────────────
-    def _send_text(self, _=None):
-        txt = self._entry.get().strip()
-        if not txt:
-            return
-        self._entry.delete(0, "end")
-        self._convo.append("user", txt)
-        # Route to Jarvis logic via queue or direct call
-        # For now, echo with a placeholder response
-        post("status", "thinking")
-        def _respond():
-            time.sleep(0.8)
-            post("log", ("jarvis", f"(Text input received: '{txt}')"))
-            post("status", "idle")
-        threading.Thread(target=_respond, daemon=True).start()
+    def run_jarvis_logic(self):
+        """
+        This is where your main.py logic runs in the background.
+        We import it safely here so it doesn't block the GUI thread.
+        """
+        try:
+            # Suppress stdout during import
+            import importlib.util, io, contextlib
+            spec = importlib.util.spec_from_file_location("main", "main.py")
+            main_module = importlib.util.module_from_spec(spec)
+            
+            # Monkey-patch the post function so main.py uses OUR queue
+            main_module.post = post 
+            
+            with contextlib.redirect_stdout(io.StringIO()):
+                spec.loader.exec_module(main_module)
+                
+            # Start the actual voice loop
+            main_module.write()
+        except Exception as e:
+            post("log", ("jarvis", f"Critical system error: {str(e)}"))
+            post("status", "error")
 
-    def _clear_log(self):
-        self._convo._text.config(state="normal")
-        self._convo._text.delete("1.0", "end")
-        self._convo._text.config(state="disabled")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = JarvisApp()
     app.mainloop()
