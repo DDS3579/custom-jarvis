@@ -5,23 +5,21 @@ import platform
 @tool("arp_scan_terminal", return_direct=True)
 def arp_scan_terminal() -> str:
     """
-    Runs 'arp -a' in a new Terminal window on macOS.
-    Example queries:
-    - "Show me the ARP table"
-    - "Run arp scan"
-    - "Find all devices on my network"
+    Scans the local network and returns the list of connected devices.
+    Use this when the user asks to see connected devices, run an arp scan, or find devices on the network.
     """
     system = platform.system()
-
-    if system == "Darwin":
-        apple_script = '''
-        tell application "Terminal"
-            activate
-            do script "arp -a"
-        end tell
-        '''
-        subprocess.Popen(["osascript", "-e", apple_script])
-        return "Absolutely sir! All devices on your network are now been listed in your Terminal, what else can I help with?."
-
-    else:
-        return f"⚠️ arp scan in terminal only implemented for macOS Terminal, not {system}."
+    try:
+        # Run arp -a silently and capture the output
+        if system == "Windows":
+            result = subprocess.run(["arp", "-a"], capture_output=True, text=True, shell=True)
+        else: # macOS and Linux
+            result = subprocess.run(["arp", "-a"], capture_output=True, text=True)
+            
+        if result.returncode == 0:
+            # Return the raw text so the LLM can summarize it for the user
+            return f"Here is the raw ARP data. Please summarize the connected devices for the user:\n{result.stdout}"
+        else:
+            return f"Failed to run arp scan. Error: {result.stderr}"
+    except Exception as e:
+        return f"An error occurred while scanning the network: {str(e)}"
