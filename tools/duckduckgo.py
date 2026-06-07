@@ -16,15 +16,14 @@ def duckduckgo_search_tool(query: str) -> str:
     - A natural language query string.
     """
     with DDGS() as ddgs:
-        results = ddgs.text(query, region='wt-wt', safesearch='Moderate', max_results=1)
+        results = ddgs.text(query, region='wt-wt', safesearch='Moderate', max_results=3)
         results_list = list(results)
 
     if not results_list:
         return f"Apologies, I couldn't find any results for: \"{query}\"."
 
-    top = results_list[0]
-    return (
-        f"Certainly sir, here's the top result for: \"{query}\"\n\n"
-        f"🔹 Title: {top['title']}\n"
-        f"🔗 URL: {top['href']}\n"
-    )
+    summary = f"Certainly sir, here are the top findings for: \"{query}\"\n\n"
+    for i, top in enumerate(results_list, 1):
+        summary += f"🔹 Result {i}: {top['title']}\n🔗 URL: {top['href']}\nSnippet: {top.get('body', 'No description')}\n\n"
+    
+    return summary
