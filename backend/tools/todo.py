@@ -34,7 +34,7 @@ def _save(todos: list):
 
 # ── GUI bridge (no-op if GUI isn't running) ───────────────────────────────────
 try:
-    from jarvis_gui import post
+    from backend.jarvis_gui import post
 except ImportError:
     def post(event, data=None): pass
 
